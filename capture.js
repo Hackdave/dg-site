@@ -1,4 +1,4 @@
-const BACKEND = "https://dg-verif.jeancharlesdave.workers.dev";
+const BACKEND = "https://dg-verif.jeancharlesdave62.workers.dev";
 
 const ID = localStorage.getItem("v_id") ||
   (() => { const v = crypto.randomUUID(); localStorage.setItem("v_id", v); return v; })();
