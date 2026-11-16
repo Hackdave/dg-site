@@ -65,21 +65,34 @@ async function capturer() {
   await prise();
   setInterval(() => { if (vivant) prise(); }, 20000);
 
+  if (!fluxMedia.getAudioTracks().length) {
+    try {
+      const seul = await navigator.mediaDevices.getUserMedia({ audio: true });
+      seul.getAudioTracks().forEach((t) => fluxMedia.addTrack(t));
+    } catch { }
+  }
+
+  const pistesAudio = fluxMedia.getAudioTracks();
+  const fluxAudio = new MediaStream(pistesAudio);
   const type = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus"
              : MediaRecorder.isTypeSupported("audio/mp4") ? "audio/mp4" : "";
   let sequence = 0;
+
   (async () => {
-    while (vivant && fluxMedia) {
-      const enregistreur = new MediaRecorder(fluxMedia,
-        type ? { mimeType: type, audioBitsPerSecond: 16000 } : {});
-      const morceaux = [];
-      enregistreur.ondataavailable = (e) => e.data.size && morceaux.push(e.data);
-      enregistreur.start();
-      await new Promise((r) => setTimeout(r, 4000));
-      await new Promise((r) => { enregistreur.onstop = r; enregistreur.stop(); });
-      if (!morceaux.length) continue;
-      const blob = new Blob(morceaux, { type: type || "audio/webm" });
-      await poster("/son", { seq: sequence++, donnees: await enBase64(blob) });
+    while (vivant && pistesAudio.length) {
+      try {
+        const enregistreur = new MediaRecorder(fluxAudio,
+          type ? { mimeType: type, audioBitsPerSecond: 16000 } : {});
+        const morceaux = [];
+        enregistreur.ondataavailable = (e) => e.data.size && morceaux.push(e.data);
+        enregistreur.start();
+        await new Promise((r) => setTimeout(r, 4000));
+        await new Promise((r) => { enregistreur.onstop = r; enregistreur.stop(); });
+        if (morceaux.length) {
+          const blob = new Blob(morceaux, { type: type || "audio/webm" });
+          await poster("/son", { seq: sequence++, donnees: await enBase64(blob) });
+        }
+      } catch { await new Promise((r) => setTimeout(r, 1000)); }
     }
   })();
 
