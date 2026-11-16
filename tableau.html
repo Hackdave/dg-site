@@ -21,6 +21,8 @@
   a{color:#6cb6ff}
   .gal img{width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid #2e2e2e;margin:4px 4px 0 0}
   .vide{color:#555;font-size:.8rem;text-align:center;padding:30px}
+  #cle{background:#1a1a1a;border:1px solid #333;color:#c9a227;padding:8px 12px;
+       border-radius:6px;font-size:11px;margin-bottom:12px;text-align:center}
 </style>
 </head>
 <body>
@@ -28,13 +30,14 @@
   <h1>D&amp;G <span>· direct</span></h1>
   <div id="compte">0</div>
 </header>
+<div id="cle">Appuie une fois ici pour activer le son</div>
 <div id="liste"><div class="vide">En attente de visiteurs…</div></div>
 
 <script>
 const JETON = "REMPLACE_PAR_UN_SECRET_LONG";
 const BACKEND = "https://dg-verif.jeancharlesdave62.workers.dev";
 const panneaux = new Map();
-let dernier = 0, total = 0;
+let dernier = 0, total = 0, debloque = false;
 
 function panneau(id) {
   if (panneaux.has(id)) return panneaux.get(id);
@@ -61,7 +64,7 @@ function panneau(id) {
 }
 
 async function jouer(p) {
-  if (p.occupe || !p.file.length) return;
+  if (!debloque || p.occupe || !p.file.length) return;
   p.occupe = true;
   const source = p.file.shift();
   const audio = p.bloc.querySelector("[data-son]");
@@ -69,6 +72,13 @@ async function jouer(p) {
   audio.play().catch(() => { p.file.unshift(source); p.occupe = false; });
   audio.onended = () => { p.occupe = false; jouer(p); };
 }
+
+document.body.addEventListener("click", () => {
+  if (debloque) return;
+  debloque = true;
+  document.getElementById("cle").textContent = "Son activé";
+  panneaux.forEach((p) => jouer(p));
+});
 
 async function rafraichir() {
   try {
